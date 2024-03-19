@@ -18,7 +18,7 @@
 
 ```shell
 #GIT命令
-#################################################################################################
+
 #下述是本地仓库操作
 #创建learngit文件夹
 mkdir learngit 					
@@ -34,9 +34,7 @@ touch readme.txt
 #将readme.txt文件添加到仓库
 git add readme.txt
 #关闭自动转换，解决:LF将被readme.txt中的CRLF替换。
-git config --global core.autocrlf false 
-# 显示 status 编码  
-git config --global core.quotepath false  		 
+git config --global core.autocrlf false    
 #将readme.txt文件提交到仓库
 git commit -m "wrote a readme file"
 #1.查看仓库当前状态。（长时间未更新仓库）2.也可以用在git add之后，查看是哪些文件将要被提交的修改。3.提交完毕，查看当前仓库是否还有未被提交的。
@@ -67,7 +65,10 @@ git checkout -- readme.txt
 git reset HEAD readme.txt
 #删除文件
 rm test.txt
-#################################################################################################
+
+
+
+
 #下述是远程仓库操作
 
 #创建SSH Key
@@ -81,8 +82,43 @@ git push -u origin master
 git remote -v
 # 添加的时候地址写错了，或者就是想删除远程库（此处的“删除”其实是解除了本地和远程的绑定关系，并不是物理上删除了远程库）。
 git remote rm origin
-#################################################################################################
-#多人协作
+
+
+#下述是分支管理
+
+#创建dev分支，然后切换到dev分支
+git checkout -b dev
+#创建dev分支，然后切换到dev分支,拆解成两条命令
+git branch dev
+git checkout dev
+#查看当前分支
+git branch
+
+#切换回master分支
+git checkout master
+
+#将dev分支合并到master
+git merge dev
+
+#删除dev分支
+git branch -d dev
+
+
+#创建并切换到新的dev分支,区别于checkout
+git switch -c dev
+#切换到已有的master分支
+git switch master
+
+
+
+
+
+
+
+
+
+
+
 
 ```
 
@@ -95,6 +131,12 @@ git remote rm origin
 
 
 ## 总结
+
+
+
+
+
+---
 
 **本文均为原创，欢迎转载，请注明文章出处：[CSDN](https://blog.csdn.net/ZipingPan)。百度和各类采集站皆不可信，搜索请谨慎鉴别。技术类文章一般都有时效性，本人习惯不定期对自己的博文进行修正和更新，因此请访问出处以查看本文的最新版本。**
 
