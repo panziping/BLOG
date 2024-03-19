@@ -1,4 +1,6 @@
 #GIT命令
+
+#下述是本地仓库操作
 #创建learngit文件夹
 mkdir learngit 					
 #进入learngit文件夹
@@ -46,7 +48,7 @@ git reset HEAD readme.txt
 rm test.txt
 
 
-#上述是本地仓库操作
+
 
 #下述是远程仓库操作
 
@@ -61,6 +63,18 @@ git push -u origin master
 git remote -v
 # 添加的时候地址写错了，或者就是想删除远程库（此处的“删除”其实是解除了本地和远程的绑定关系，并不是物理上删除了远程库）。
 git remote rm origin
+
+
+#下述是分支管理
+
+#创建dev分支，然后切换到dev分支
+git checkout -b dev
+#创建dev分支，然后切换到dev分支,拆解成两条命令
+git branch dev
+git checkout dev
+#查看当前分支
+git branch
+
 
 
 
