@@ -1,4 +1,6 @@
 #GIT命令
+
+#下述是本地仓库操作
 #创建learngit文件夹
 mkdir learngit 					
 #进入learngit文件夹
@@ -46,7 +48,7 @@ git reset HEAD readme.txt
 rm test.txt
 
 
-#上述是本地仓库操作
+
 
 #下述是远程仓库操作
 
@@ -63,7 +65,30 @@ git remote -v
 git remote rm origin
 
 
+#下述是分支管理
 
+#创建dev分支，然后切换到dev分支
+git checkout -b dev
+#创建dev分支，然后切换到dev分支,拆解成两条命令
+git branch dev
+git checkout dev
+#查看当前分支
+git branch
+
+#切换回master分支
+git checkout master
+
+#将dev分支合并到master
+git merge dev
+
+#删除dev分支
+git branch -d dev
+
+
+#创建并切换到新的dev分支,区别于checkout
+git switch -c dev
+#切换到已有的master分支
+git switch master
 
 
 
