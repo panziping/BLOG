@@ -1,4 +1,4 @@
-# Intel FPGA (3a)：状态机
+# Intel FPGA (4)：状态机
 
 ## 前提摘要
 
@@ -44,7 +44,7 @@ Moore型状态机和Mealy型状态机的区别 ：
 
 
 
-![](Intel FPGA (3a)：状态机-P1.png)
+![](Intel FPGA (4)：状态机-p1.png)
 
 
 
@@ -70,7 +70,7 @@ Moore型状态机和Mealy型状态机的区别 ：
 
 #### 硬件资源
 
-![image-20240320124438964](Intel FPGA (3a)：状态机-P2.png)
+![image-20240320124438964](Intel FPGA (4)：状态机-p2.png)
 
 **按下按键S2控制4个LED左移，按下按键S3控制4个LED右移。**
 
@@ -78,11 +78,11 @@ Moore型状态机和Mealy型状态机的区别 ：
 
 状态转移图为：
 
-![](Intel FPGA (3a)：状态机-P3.png)
+![](Intel FPGA (4)：状态机-p3.png)
 
 状态转移条件为：
 
-![](Intel FPGA (3a)：状态机-P4.png)
+![](Intel FPGA (4)：状态机-p4.png)
 
 按键消抖程序：
 

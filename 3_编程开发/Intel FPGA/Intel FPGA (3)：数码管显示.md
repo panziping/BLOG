@@ -1,4 +1,4 @@
-# Intel FPGA (2b)：数码管显示（LSM）
+# Intel FPGA (3)：数码管显示
 
 ## 前提摘要
 
@@ -25,7 +25,7 @@
 
 ### 硬件资源
 
-![](Intel FPGA (2b)：数码管显示(LSM)-P1.png)
+![](Intel FPGA (3)：数码管显示-p1.png)
 
 图中HEX_A、HEX_B、HEX_C、HEX_D、HEX_E、HEX_F、HEX_G、HEX_DP控制的是数码管的段码；HEX_SEL0、HEX_SEL1、HEX_SEL2、HEX_SEL3、HEX_SEL4、HEX_SEL5、HEX_SEL6、HEX_SEL7控制的是数码管的位码。
 
@@ -33,7 +33,7 @@
 
 下表为共阳极数码管译码表。
 
-![](Intel FPGA (2b)：数码管显示(LSM)-P2.png)
+![](Intel FPGA (3)：数码管显示-p2.png)
 
 数码管的显示方式有独立显示和扫描显示。**本篇使用的扫描显示**。
 
@@ -45,11 +45,11 @@
 
 这里截取了74HC595的部分数据手册，读者自行阅读。
 
-![](Intel FPGA (2b)：数码管显示(LSM)-P3.png)
+![](Intel FPGA (3)：数码管显示-p3.png)
 
-![](Intel FPGA (2b)：数码管显示(LSM)-P4.png)
+![](Intel FPGA (3)：数码管显示-p4.png)
 
-![](Intel FPGA (2b)：数码管显示(LSM)-P5.png)
+![](Intel FPGA (3)：数码管显示-p5.png)
 
 
 
@@ -61,7 +61,7 @@
 
 由上文74HC595数据手册可以知道SH_CP（SCLK）、ST_CP（RCLK）和DS（DIO）的时序关系。
 
-![](Intel FPGA (2b)：数码管显示(LSM)-P6.png)
+![](Intel FPGA (3)：数码管显示-p6.png)
 
 74HC595驱动程序：
 
