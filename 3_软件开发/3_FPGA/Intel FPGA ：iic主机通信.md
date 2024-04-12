@@ -36,6 +36,8 @@
 
 ### 协议层(一主多从)
 
+理论上IIC是**多主多从**总线，这里为了简化只设计了**一个主机**。
+
 ![](./图库/Intel FPGA ：iic主机通信/Intel FPGA ：iic主机通信-P2.png)
 
 - 起始信号和终止信号
@@ -58,7 +60,43 @@
 
   ![](./图库/Intel FPGA ：iic主机通信/Intel FPGA ：iic主机通信-P5.png)
 
-  
+
+#### IIC读写操作
+
+写操作：
+
+iic one byte write :
+
+start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + data + (slave ack) + stop;	
+
+iic multiple bytes write :
+
+start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + data + (slave ack) + ... + data + (slave ack) + stop;
+
+读操作：
+
+iic one byte read :
+
+start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + 
+
+start + (device address & 8'b0000_0001) + (slave ack) + data + (master nack) + stop; 
+
+iic multiple bytes read : 
+
+start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + 
+
+start + (device address & 8'b0000_0001) + (slave ack) + data + (master ack) + ... + data + (master nack) + stop;
+
+由于IIC协议中关于传输device address 、reg address和数据的过程类似，
+
+所以将IIC读写操作分别细化为以下几个过程
+
+- Start Sign + Device address + Slave Ack
+- Reg address + Slave Ack
+- Data + Slave Ack
+- Data + Slave Ack +Stop Sign
+- Data + Master Ack
+- Data + Master Nack +Stop Sign
 
 ### 波形图
 
@@ -90,17 +128,704 @@
 
 
 
+### 代码展示
+
+iic控制
+
+```verilog
+module iic_ctrl(
+	clk,
+	rst_n,
+	
+	iic_device_addr,
+	iic_reg_addr,
+	
+	iic_rd_en_go,
+	iic_rd_data,
+	
+	iic_wr_en_go,
+	iic_wr_data,
+	iic_rw_data_valid_go,
+	iic_busy,
+	iic_sclk,
+	iic_sdat
+);
+
+	input 			clk;
+	input 			rst_n;
+	
+	input  [6:0] 	iic_device_addr;
+	input  [7:0] 	iic_reg_addr;
+	
+	input 			iic_rd_en_go;
+	output [7:0] 	iic_rd_data;
+	
+	input 			iic_wr_en_go;
+	input  [7:0] 	iic_wr_data;
+	output 			iic_rw_data_valid_go;
+	
+	output 			iic_busy;
+	output 			iic_sclk;
+	inout 			iic_sdat;
+
+	// ******************************************************************************************************************************************************************* //
+	// write : *write = 0*																																																  //
+	// iic one byte write : 																																												           //
+	//	start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + data + (slave ack) + stop;																		  //
+	// iic multiple bytes write : 																																												  	  //
+	//	start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + data + (slave ack) + ... + data + (slave ack) + stop;									  //																																								              //
+	// ******************************************************************************************************************************************************************* //
+	// read  : *read = 1*																																											  	  				  //
+	// iic one byte read : 																																												  	  			  //
+	//	start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + 																										  //
+	// start + (device address & 8'b0000_0001) + (slave ack) + data + (master nack) + stop; 																										  //
+	// iic multiple bytes read : 																																												  	     //
+	// start + (device address & 8'b0000_0000) + (slave ack) + reg address + (slave ack) + 																										  //
+	// start + (device address & 8'b0000_0001) + (slave ack) + data + (master ack) + ... + data + (master nack) + stop; 																	  //
+	// ******************************************************************************************************************************************************************* //
+
+	localparam STA  = 6'b000_001;
+	localparam WR   = 6'b000_010; 
+	localparam RD   = 6'b000_100;
+	localparam ACK  = 6'b001_000;	// master gen ack
+	localparam NACK = 6'b010_000;	// master gen nack
+	localparam STOP = 6'b100_000;
+	
+	
+	localparam S_IDLE  	    = 7'b000_0001;
+	localparam S_WR_REG		 = 7'b000_0010;
+	localparam S_WAIT_WR_REG = 7'b000_0100;
+	localparam S_WR_REG_DONE = 7'b000_1000;
+ 	localparam S_RD_REG 		 = 7'b001_0000;
+	localparam S_WAIT_RD_REG = 7'b010_0000;
+	localparam S_RD_REG_DONE = 7'b100_0000;
+	
+	reg r_iic_en_go;
+	reg [5:0] r_iic_cmd;
+	reg [7:0] r_wr_data;
+	wire [7:0] w_rd_data;
+	wire w_trans_done;
+	wire w_slave_ack;
+iic_driver iic_driver(
+	.clk(clk),
+	.rst_n(rst_n),
+	.iic_cmd(r_iic_cmd),
+	.iic_en_go(r_iic_en_go),
+	.rd_data(w_rd_data),
+	.wr_data(r_wr_data),
+	.trans_done(w_trans_done),
+	.slave_ack(w_slave_ack),
+	.iic_sclk(iic_sclk),
+	.iic_sdat(iic_sdat)
+);
+
+	task read_byte;
+	input [5:0] ctrl_cmd;
+	begin
+		r_iic_en_go <= 1'b1;
+		r_iic_cmd <= ctrl_cmd;
+	end
+	endtask
+	
+	task write_byte;
+	input [5:0] ctrl_cmd;
+	input [7:0] wr_byte_data;
+	begin
+		r_iic_en_go <= 1'b1;
+		r_iic_cmd <= ctrl_cmd;
+		r_wr_data <= wr_byte_data;
+	end
+	endtask
+	
+	reg [6:0] r_current_state;
+	reg [6:0] r_next_state;
+	reg [7:0] r_cnt; 
+	
+	always@(posedge clk or negedge rst_n) begin
+		if(!rst_n)
+			r_current_state <= S_IDLE;
+		else
+			r_current_state <= r_next_state;
+	end
+	
+	always@(*) begin
+		case(r_current_state)
+			S_IDLE: begin
+				if(iic_wr_en_go == 1'b1)
+					r_next_state = S_WR_REG;
+				else if(iic_rd_en_go == 1'b1)
+					r_next_state = S_RD_REG;
+				else
+					r_next_state = S_IDLE;
+			end
+			S_WR_REG: begin
+				r_next_state = S_WAIT_WR_REG;
+			end
+			S_WAIT_WR_REG: begin
+				if(w_trans_done == 1'b1) begin
+					case(r_cnt)
+						8'd0: r_next_state = (w_slave_ack == 1'd0) ? S_WR_REG : S_IDLE; // device addr
+						8'd1: r_next_state = (w_slave_ack == 1'd0) ? S_WR_REG : S_IDLE; // reg addr
+						8'd2: r_next_state = (w_slave_ack == 1'd0) ? S_WR_REG_DONE : S_IDLE; //wr data
+						default: r_next_state = S_IDLE;
+					endcase
+				end
+				else
+					r_next_state = S_WAIT_WR_REG;
+			end
+			S_WR_REG_DONE: begin
+				r_next_state = S_IDLE;
+			end
+			
+			S_RD_REG: begin
+				r_next_state = S_WAIT_RD_REG;
+			end
+			S_WAIT_RD_REG: begin
+				if(w_trans_done == 1'b1) begin
+					case(r_cnt)
+						8'd0: r_next_state = (w_slave_ack == 1'd0) ? S_RD_REG : S_IDLE; // device addr
+						8'd1: r_next_state = (w_slave_ack == 1'd0) ? S_RD_REG : S_IDLE; // reg addr
+						8'd2: r_next_state = (w_slave_ack == 1'd0) ? S_RD_REG : S_IDLE; // device addr
+						8'd3: r_next_state = S_RD_REG_DONE ; // rd data
+						default: r_next_state = S_IDLE;
+					endcase
+				end
+				else
+					r_next_state = S_WAIT_RD_REG;
+			end
+			S_RD_REG_DONE: begin
+				r_next_state = S_IDLE;
+			end
+			default: r_next_state = S_IDLE;
+		endcase
+	end
+	
+	
+
+	reg r_rw_data_valid_go;
+	reg [7:0] r_iic_rd_data;
+	always@(posedge clk or negedge rst_n) begin
+		if(!rst_n) begin
+			r_cnt <= 8'd0;
+			r_iic_cmd <= 6'd0;
+			r_iic_en_go <= 1'b0;
+			r_rw_data_valid_go <= 1'b0;
+			r_wr_data <= 8'd0;
+			r_iic_rd_data <= 8'd0;
+		end
+		else begin
+			case(r_current_state)
+				S_IDLE: begin
+					r_cnt <= 8'd0;
+					r_iic_cmd <= 6'd0;
+					r_iic_en_go <= 1'b0;
+					r_rw_data_valid_go <= 1'b0;
+					r_wr_data <= 8'd0;
+				end // S_IDLE
+				
+				S_WR_REG: begin
+					case(r_cnt)
+						8'd0: write_byte(STA|WR,{iic_device_addr,1'b0} | 8'b0000_0000);
+						8'd1: write_byte(WR,iic_reg_addr);
+						8'd2: write_byte(WR|STOP,iic_wr_data);
+						default:;
+					endcase
+				end //S_WR_REG
+				
+				S_WAIT_WR_REG: begin
+					r_iic_en_go <= 1'b0;
+					if(w_trans_done == 1'b1)
+						r_cnt <= r_cnt + 1'b1;
+					else	
+						r_cnt <= r_cnt;
+				end // S_WAIT_WR_REG
+				
+				S_WR_REG_DONE: begin
+					r_rw_data_valid_go <= 1'b1;
+				end // S_WR_REG_DONE
+				
+				S_RD_REG: begin
+					case(r_cnt)
+						8'd0: write_byte(STA|WR,{iic_device_addr,1'b0} | 8'b0000_0000);
+						8'd1: write_byte(WR,iic_reg_addr);
+						8'd2: write_byte(STA|WR,{iic_device_addr,1'b0}| 8'b0000_0001);
+						8'd3: read_byte(RD|NACK|STOP);
+						default:;
+					endcase
+				end // S_RD_REG
+				
+				S_WAIT_RD_REG: begin
+					r_iic_en_go <= 1'b0;
+					if(w_trans_done == 1'b1)
+						r_cnt <= r_cnt + 1'b1;
+					else	
+						r_cnt <= r_cnt;
+				end //S_WAIT_RD_REG
+				
+				S_RD_REG_DONE: begin
+					r_iic_rd_data <= w_rd_data;
+					r_rw_data_valid_go <= 1'b1;
+				end
+				default: begin
+					r_cnt <= 8'd0;
+					r_iic_cmd <= 6'd0;
+					r_iic_en_go <= 1'b0;
+					r_rw_data_valid_go <= 1'b0;
+					r_wr_data <= 8'd0;
+					r_iic_rd_data <= 8'd0;
+				end
+			endcase
+		end 
+	end
+	
+	assign iic_rd_data = r_iic_rd_data;
+	assign iic_rw_data_valid_go = r_rw_data_valid_go;
+	
+	assign iic_busy = (r_current_state != S_IDLE);
 
 
 
+endmodule
+
+```
+
+iic底层驱动
+
+```verilog
+
+module iic_driver(
+	clk,
+	rst_n,
+	iic_cmd,
+	iic_en_go,
+	rd_data,
+	wr_data,
+	trans_done,
+	slave_ack,
+	iic_sclk,
+	iic_sdat
+);
+
+	input 			clk;
+	input 			rst_n;
+	
+	input  [5:0] 	iic_cmd;
+	input 			iic_en_go;
+	
+	output [7:0] 	rd_data;
+	input  [7:0] 	wr_data;
+	
+	output 			trans_done;
+	output 			slave_ack;
+	
+	output 			iic_sclk;
+	inout 			iic_sdat;
+	
+
+	
+	parameter SYS_CLOCK         = 50_000_000;
+	parameter IIC_SCLK          = 400_000;
+	localparam IIC_SCLK_CNT_MAX = SYS_CLOCK / IIC_SCLK / 4;
+	
+	reg r_sclk_div_en;
+	reg [$clog2(IIC_SCLK_CNT_MAX)-1:0] r_sclk_div_cnt;
+	always@(posedge clk or negedge rst_n) begin
+		if(!rst_n)
+			r_sclk_div_cnt <= 'd0;
+		else if(r_sclk_div_en == 1'b1)
+			if(r_sclk_div_cnt == IIC_SCLK_CNT_MAX - 1'b1)
+				r_sclk_div_cnt <= 'd0;
+			else
+				r_sclk_div_cnt <= r_sclk_div_cnt + 1'b1;
+		else
+			r_sclk_div_cnt <= 'd0;
+	end
+	
+	wire w_sclk_plus;
+	assign w_sclk_plus = (r_sclk_div_cnt == IIC_SCLK_CNT_MAX - 1'b1) ? 1'b1 : 1'b0; 
+	
+	reg [7:0] r_wr_data;
+	reg [5:0] r_iic_cmd;
+	reg r_iic_en_go;
+	always@(posedge clk or negedge rst_n) begin
+		if(!rst_n)begin
+			r_wr_data <= 8'd0;
+			r_iic_cmd <= 6'd0;
+		end
+		else if(iic_en_go == 1'b1) begin
+			r_wr_data <= wr_data;
+			r_iic_cmd <= iic_cmd;
+		end
+		else begin
+			r_wr_data <= r_wr_data;
+			r_iic_cmd <= r_iic_cmd;
+		end
+	end
+	
+	always@(posedge clk or negedge rst_n) begin
+		if(!rst_n)
+			r_iic_en_go <= 1'b0;
+		else
+			r_iic_en_go <= iic_en_go;
+	end
+	
+	
+	
+	
+	localparam STA  = 6'b000_001;
+	localparam WR   = 6'b000_010; 
+	localparam RD   = 6'b000_100;
+	localparam ACK  = 6'b001_000;
+	localparam NACK = 6'b010_000;
+	localparam STOP = 6'b100_000;
+	
+	localparam S_IDLE		  = 7'b0_000_001;
+	localparam S_GEN_STA	  = 7'b0_000_010;
+	localparam S_WR_DATA   = 7'b0_000_100;
+	localparam S_RD_DATA	  = 7'b0_001_000;
+	localparam S_CHECK_ACK = 7'b0_010_000;
+	localparam S_GEN_ACK   = 7'b0_100_000;
+	localparam S_GEN_STOP  = 7'b1_000_000;
+	
+	
+	
+	reg [6:0] r_current_state;
+	reg [6:0] r_next_state;
+	always@(posedge clk or negedge rst_n) begin
+		if(!rst_n)
+			r_current_state <= S_IDLE;
+		else
+			r_current_state <= r_next_state;
+	end
+	
+	reg [7:0] 	r_bit_cnt;
+
+	always@(*) begin
+		case(r_current_state)
+			S_IDLE : begin
+				if(r_iic_en_go == 1'b1) begin
+					if(r_iic_cmd & STA)
+						r_next_state = S_GEN_STA;
+					else if(r_iic_cmd & WR)
+						r_next_state = S_WR_DATA;
+					else if(r_iic_cmd & RD)
+						r_next_state = S_RD_DATA;
+					else
+						r_next_state = S_IDLE;
+				end
+				else
+					r_next_state = S_IDLE; 
+			end //S_IDLE
+		
+			S_GEN_STA: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3) begin
+						if(r_iic_cmd & WR)
+							r_next_state = S_WR_DATA;
+						else if(r_iic_cmd & RD)
+							r_next_state = S_RD_DATA;
+						else
+							r_next_state = S_IDLE;
+					end
+					else	
+						r_next_state = S_GEN_STA;
+				end 
+				else
+					r_next_state = S_GEN_STA;
+			end //S_GEN_STA
+		
+			S_WR_DATA: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd31)
+						r_next_state = S_CHECK_ACK;
+					else
+						r_next_state = S_WR_DATA;
+				end 
+				else
+					r_next_state = S_WR_DATA;
+			end // S_WR_DATA
+
+			S_RD_DATA: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd31)
+						r_next_state = S_GEN_ACK;
+					else
+						r_next_state = S_RD_DATA;
+				end
+				else
+					r_next_state = S_RD_DATA;
+			end // S_RD_DATA
+			
+			S_CHECK_ACK: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3) begin
+						if(r_iic_cmd & STOP)
+							r_next_state = S_GEN_STOP;
+						else 
+							r_next_state = S_IDLE;
+					end
+					else
+						r_next_state = S_CHECK_ACK;
+				end
+				else
+					r_next_state = S_CHECK_ACK;
+			end // S_CHECK_ACK
+		
+			S_GEN_ACK: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3) begin
+						if(r_iic_cmd & STOP)
+							r_next_state = S_GEN_STOP;
+						else
+							r_next_state = S_IDLE;
+					end
+					else
+						r_next_state = S_GEN_ACK;
+				end
+				else
+					r_next_state = S_GEN_ACK;
+			end //S_GEN_ACK
+			S_GEN_STOP: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3)
+						r_next_state = S_IDLE;
+					else
+						r_next_state = S_GEN_STOP;
+				end
+				else
+					r_next_state = S_GEN_STOP;
+			end // S_GEN_STOP	
+			default:r_next_state = S_IDLE;
+		endcase
+	end
+	
+	
+
+	reg 		  	r_iic_sclk;
+	reg 			r_iic_sdat_o;
+	reg  			r_iic_sdat_en;
+	reg 			r_slave_ack;
+	reg [7:0] 	r_rd_data;
+	
+	always@(posedge clk or negedge rst_n) begin
+		if(!rst_n) begin
+			r_bit_cnt <= 'd0;
+			r_iic_sclk <= 1'b1;
+			r_iic_sdat_o <= 1'b1;
+			r_iic_sdat_en <= 1'b0;
+			r_slave_ack <= 1'b1;
+			r_rd_data <= 8'd0;
+			r_sclk_div_en <= 1'b0;
+		end
+		else begin
+			case(r_current_state)
+			S_IDLE : begin
+				r_sclk_div_en <= 1'b0;
+				r_iic_sdat_en <= 1'b0;
+				//r_iic_sclk <= 1'b1; // dont pull up. Unless the sclk bus is a hiz state
+				r_bit_cnt <= 'd0;
+				if(r_iic_en_go == 1'b1)
+					r_sclk_div_en <= 1'b1;
+				else
+					r_sclk_div_en <= 1'b0;
+			end //S_IDLE
+			
+			S_GEN_STA: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3)
+						r_bit_cnt <= 'd0;
+					else
+						r_bit_cnt <= r_bit_cnt + 1'd1;
+						
+					case(r_bit_cnt)
+						'd0: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b1; end
+						'd1: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b1; end
+						'd2: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b0; r_iic_sdat_en <= 1'b1; end
+						'd3: begin r_iic_sclk <= 1'b0; r_iic_sdat_o <= 1'b0; r_iic_sdat_en <= 1'b1; end
+						default: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b0; end
+					endcase
+				end 
+				else begin
+					r_bit_cnt <= r_bit_cnt;
+					r_iic_sclk <= r_iic_sclk;
+					r_iic_sdat_o <= r_iic_sdat_o;
+					r_iic_sdat_en <= r_iic_sdat_en;
+				end
+			end //S_GEN_STA
+			
+			S_WR_DATA: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd31)
+						r_bit_cnt <= 'd0;
+					else
+						r_bit_cnt <= r_bit_cnt + 1'b1;
+						
+					case(r_bit_cnt)
+						'd0,'d4,'d8, 'd12,'d16,'d20,'d24,'d28: begin r_iic_sclk <= 1'b0; r_iic_sdat_o <= r_wr_data[7 - r_bit_cnt[4:2]]; r_iic_sdat_en <= 1'b1; end 
+						'd1,'d5,'d9, 'd13,'d17,'d21,'d25,'d29: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= r_iic_sdat_o; r_iic_sdat_en <= 1'b1; end
+						'd2,'d6,'d10,'d14,'d18,'d22,'d26,'d30: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= r_iic_sdat_o; r_iic_sdat_en <= 1'b1; end
+						'd3,'d7,'d11,'d15,'d19,'d23,'d27,'d31: begin r_iic_sclk <= 1'b0; r_iic_sdat_o <= r_iic_sdat_o; r_iic_sdat_en <= 1'b1; end
+						default: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b0; end
+					endcase
+				end 
+				else begin
+					r_bit_cnt <= r_bit_cnt;
+					r_iic_sclk <= r_iic_sclk;
+					r_iic_sdat_o <= r_iic_sdat_o;
+					r_iic_sdat_en <= r_iic_sdat_en;
+				end
+			end // S_WR_DATA
+			
+			S_RD_DATA: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd31)
+						r_bit_cnt <= 'd0;
+					else
+						r_bit_cnt <= r_bit_cnt + 1'b1;
+						
+					case(r_bit_cnt)
+						'd0,'d4,'d8, 'd12,'d16,'d20,'d24,'d28: begin r_iic_sclk <= 1'b0; r_iic_sdat_en <= 1'b0; end 
+						'd1,'d5,'d9, 'd13,'d17,'d21,'d25,'d29: begin r_iic_sclk <= 1'b1; r_iic_sdat_en <= 1'b0; end
+						'd2,'d6,'d10,'d14,'d18,'d22,'d26,'d30: begin r_iic_sclk <= 1'b1; r_rd_data <= {r_rd_data[6:0],iic_sdat}; r_iic_sdat_en <= 1'b0; end
+						'd3,'d7,'d11,'d15,'d19,'d23,'d27,'d31: begin r_iic_sclk <= 1'b0; r_rd_data <= r_rd_data; r_iic_sdat_en <= 1'b0; end
+						default: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b0; end
+					endcase
+				end
+				else begin
+					r_bit_cnt <= r_bit_cnt;
+					r_iic_sclk <= r_iic_sclk;
+					r_iic_sdat_o <= r_iic_sdat_o;
+					r_iic_sdat_en <= r_iic_sdat_en;
+					r_rd_data <= r_rd_data;
+				end
+			end // S_RD_DATA
+			
+			S_CHECK_ACK: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3)
+						r_bit_cnt <= 'd0;
+					else
+						r_bit_cnt <= r_bit_cnt + 1'b1;
+						
+					case(r_bit_cnt)
+						'd0: begin r_iic_sclk <= 1'b0; r_iic_sdat_en <= 1'b0; end
+						'd1: begin r_iic_sclk <= 1'b1; r_iic_sdat_en <= 1'b0; end
+						'd2: begin r_iic_sclk <= 1'b1; r_slave_ack <= iic_sdat; r_iic_sdat_en <= 1'b0; end
+						'd3: begin r_iic_sclk <= 1'b0; r_slave_ack <=r_slave_ack; r_iic_sdat_en <= 1'b0; end
+						default: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b0; end
+					endcase
+				end
+				else begin
+					r_bit_cnt <= r_bit_cnt;
+					r_iic_sclk <= r_iic_sclk;
+					r_iic_sdat_o <= r_iic_sdat_o;
+					r_iic_sdat_en <= r_iic_sdat_en;
+					r_slave_ack <= r_slave_ack;
+				end
+			end // S_CHECK_ACK
+			
+			S_GEN_ACK: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3)
+						r_bit_cnt <= 'd0;
+					else
+						r_bit_cnt <= r_bit_cnt + 1'b1;
+						
+					case(r_bit_cnt) 
+						'd0: begin 
+							r_iic_sclk <= 1'b0; 
+							if(r_iic_cmd & ACK)
+								r_iic_sdat_o <= 1'b0;
+							else if(r_iic_cmd & NACK)
+								r_iic_sdat_o <= 1'b1;
+							else
+								r_iic_sdat_o <= r_iic_sdat_o;
+							r_iic_sdat_en <= 1'b1;
+						end
+						'd1: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= r_iic_sdat_o; r_iic_sdat_en <= 1'b1; end
+						'd2: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= r_iic_sdat_o; r_iic_sdat_en <= 1'b1; end
+						'd3: begin r_iic_sclk <= 1'b0; r_iic_sdat_o <= r_iic_sdat_o; r_iic_sdat_en <= 1'b1; end
+						default: begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b0; end
+					endcase	
+				end
+				else begin
+					r_bit_cnt <= r_bit_cnt;
+					r_iic_sclk <= r_iic_sclk;
+					r_iic_sdat_o <= r_iic_sdat_o;
+					r_iic_sdat_en <= r_iic_sdat_en;
+				end
+				
+			end //S_GEN_ACK
+			
+			S_GEN_STOP: begin
+				if(w_sclk_plus == 1'b1) begin
+					if(r_bit_cnt == 'd3)
+						r_bit_cnt <= 'd0;
+					else
+						r_bit_cnt <= r_bit_cnt + 1'b1;
+						
+					case(r_bit_cnt)
+						'd0: begin r_iic_sclk <= 1'b0;r_iic_sdat_o <= 1'b0; r_iic_sdat_en <= 1'b1; end
+						'd1: begin r_iic_sclk <= 1'b1;r_iic_sdat_o <= 1'b0; r_iic_sdat_en <= 1'b1; end
+						'd2: begin r_iic_sclk <= 1'b1;r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b1; end
+						'd3: begin r_iic_sclk <= 1'b1;r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b1; end
+						default:begin r_iic_sclk <= 1'b1; r_iic_sdat_o <= 1'b1; r_iic_sdat_en <= 1'b0; end
+					endcase
+				end
+				else begin
+					r_bit_cnt <= r_bit_cnt;
+					r_iic_sclk <= r_iic_sclk;
+					r_iic_sdat_o <= r_iic_sdat_o;
+					r_iic_sdat_en <= r_iic_sdat_en;
+				end
+			end // S_GEN_STOP	
+			default : begin
+				r_bit_cnt <= 'd0;
+				r_iic_sclk <= 1'b1;
+				r_iic_sdat_o <= 1'b1;
+				r_iic_sdat_en <= 1'b0;
+				r_slave_ack <= 1'b1;
+				r_rd_data <= 8'd0;
+				r_sclk_div_en <= 1'b0;
+			end
+			endcase
+		end
+	end
+	
+	assign iic_sclk = r_iic_sclk;
+	assign slave_ack = r_slave_ack;
+	assign rd_data = r_rd_data;
+
+	assign iic_sdat = (r_iic_sdat_en && !r_iic_sdat_o) ? 1'b0 : 1'bz;
+	
+	
+	reg r_trans_done;
+	always@(posedge clk or negedge rst_n)
+	begin
+		if(!rst_n)
+			r_trans_done <= 1'b0;
+		else if(r_current_state == S_CHECK_ACK && r_next_state == S_IDLE)
+			r_trans_done <= 1'b1;
+		else if(r_current_state == S_GEN_ACK && r_next_state == S_IDLE)
+			r_trans_done <= 1'b1;	
+		else if(r_current_state == S_GEN_STOP && r_next_state == S_IDLE)
+			r_trans_done <= 1'b1;
+		else
+			r_trans_done <= 1'b0;
+	end
+	
+	
+	assign trans_done = r_trans_done;
 
 
+endmodule 
+```
 
 
 
 ## 总结
 
-
+本工程名为eeprom，如有需要请至github仓库查看！！！本设计只是一主多从的IIC主机，而标准IIC协议是多主多从设计，也就是说SCLK的inout类型。
 
 
 
