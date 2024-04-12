@@ -32,8 +32,6 @@ touch readme.txt
 
 #将readme.txt文件添加到仓库
 git add readme.txt
-#关闭自动转换，解决:LF将被readme.txt中的CRLF替换。
-git config --global core.autocrlf false    
 #将readme.txt文件提交到仓库
 git commit -m "wrote a readme file"
 #1.查看仓库当前状态。（长时间未更新仓库）2.也可以用在git add之后，查看是哪些文件将要被提交的修改。3.提交完毕，查看当前仓库是否还有未被提交的。
@@ -108,6 +106,17 @@ git switch -c dev
 #切换到已有的master分支
 git switch master
 ```
+
+
+
+```shell
+#关闭自动转换，解决:LF将被readme.txt中的CRLF替换。
+git config --global core.autocrlf false    
+#解决git status不能显示中文
+git config --global core.quotepath false
+```
+
+
 
 ## 总结
 
